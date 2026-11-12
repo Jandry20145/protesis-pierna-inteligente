@@ -1,0 +1,14 @@
+# Credenciales Wi-Fi locales (ver firmware/protesis_ws/secrets.example.h)
+secrets.h
+
+# Node / Vite
+node_modules/
+dist/
+*.local
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.claude/
