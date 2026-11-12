@@ -23,6 +23,7 @@ import LegCanvas from './components/LegCanvas';
 import GaitIndicator from './components/GaitIndicator';
 import SettingsPanel from './components/SettingsPanel';
 import AboutPanel from './components/AboutPanel';
+import InfoCenter from './components/InfoCenter';
 
 const UI_REFRESH_MS = 100; // 10 Hz de refresco visual (los datos llegan a 20 Hz)
 
@@ -89,6 +90,7 @@ export default function App() {
   const latest = store.latest;
   const metrics = store.metrics();
   const s = settings;
+  const { rom, peakGyro } = windowStats(store.series, latest?.x, s.windowSeconds);
   const effectiveStatus = demo ? 'demo' : ws.status;
 
   return (
@@ -130,7 +132,7 @@ export default function App() {
 
         {/* ── Área principal ──────────────────────────────────── */}
         <div className="min-w-0 space-y-4 lg:col-span-8 xl:col-span-9">
-          <MetricsBar latest={latest} metrics={metrics} />
+          <MetricsBar latest={latest} metrics={metrics} rom={rom} peakGyro={peakGyro} />
 
           {!latest && (
             <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 px-4 py-6 text-center text-sm text-slate-400">
@@ -217,6 +219,8 @@ export default function App() {
             </Panel>
           </div>
 
+          <InfoCenter latest={latest} metrics={metrics} rom={rom} peakGyro={peakGyro} settings={s} />
+
           <RawFrame frame={latest?.frame} />
         </div>
       </main>
@@ -226,6 +230,23 @@ export default function App() {
       </footer>
     </div>
   );
+}
+
+/** Rango de movimiento (máx − mín del ángulo) y pico de |velocidad angular| en la ventana visible. */
+function windowStats(series, latestX, windowSeconds) {
+  if (latestX === undefined || latestX === null) return { rom: null, peakGyro: null };
+  const x0 = latestX - windowSeconds;
+  let lo = Infinity;
+  let hi = -Infinity;
+  let peak = 0;
+  for (let i = series.angle.length - 1; i >= 0 && series.angle[i].x >= x0; i--) {
+    const a = series.angle[i].y;
+    if (a < lo) lo = a;
+    if (a > hi) hi = a;
+    const g = Math.abs(series.gyro[i]?.y ?? 0);
+    if (g > peak) peak = g;
+  }
+  return hi >= lo ? { rom: hi - lo, peakGyro: peak } : { rom: null, peakGyro: null };
 }
 
 function WindowSelector({ value, onChange }) {

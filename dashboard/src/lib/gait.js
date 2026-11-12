@@ -30,6 +30,7 @@ export class GaitDetector {
     this.lastStanceDuration = null; // s
     this.strides = []; // [{ stride, stancePct }]
     this.steps = 0;
+    this.contacts = { heel: 0, flat: 0, toe: 0 }; // tipo de primer contacto de cada paso
   }
 
   /** Comparador con histéresis: se activa sobre `thr` y se desactiva bajo `thr − h`. */
@@ -55,6 +56,7 @@ export class GaitDetector {
         this.lastIC = tMs;
         this.stanceStart = tMs;
         this.steps++;
+        this.contacts[phase]++; // 'heel' = patrón normal talón → punta
         event = 'initial-contact';
       }
     } else if (!stance && this.inStance && this.stanceStart !== null) {
@@ -70,10 +72,20 @@ export class GaitDetector {
 
   /** Promedios de las últimas zancadas válidas. */
   getMetrics() {
+    const c = this.contacts;
+    const totalContacts = c.heel + c.flat + c.toe;
+    const base = {
+      steps: this.steps,
+      contacts: { ...c },
+      heelFirstPct: totalContacts ? (c.heel / totalContacts) * 100 : null,
+    };
     const n = this.strides.length;
-    if (!n) return { steps: this.steps, strideTime: null, cadence: null, stancePct: null, swingPct: null };
+    if (!n) return { ...base, strideTime: null, strideCv: null, cadence: null, stancePct: null, swingPct: null };
     const strideTime = this.strides.reduce((a, b) => a + b.stride, 0) / n;
     const stancePct = this.strides.reduce((a, b) => a + b.stancePct, 0) / n;
-    return { steps: this.steps, strideTime, cadence: 60 / strideTime, stancePct, swingPct: 100 - stancePct };
+    // Coeficiente de variación del tiempo de zancada (%): variabilidad / estabilidad de la marcha
+    const sd = Math.sqrt(this.strides.reduce((a, b) => a + (b.stride - strideTime) ** 2, 0) / n);
+    const strideCv = n >= 3 ? (sd / strideTime) * 100 : null;
+    return { ...base, strideTime, strideCv, cadence: 60 / strideTime, stancePct, swingPct: 100 - stancePct };
   }
 }
