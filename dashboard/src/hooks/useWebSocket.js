@@ -57,6 +57,7 @@ export function useWebSocket({
   baseDelayMs = 500,
   maxDelayMs = 8000,
   staleTimeoutMs = 3000,
+  connectTimeoutMs = 5000,
 } = {}) {
   const [status, setStatusState] = useState(WS_STATUS.IDLE);
   const [error, setError] = useState(null);
@@ -73,12 +74,13 @@ export function useWebSocket({
   const reconnectTimerRef = useRef(null);
   const countersRef = useRef({ received: 0, parseErrors: 0, windowCount: 0, lastMessageAt: 0 });
   const handlersRef = useRef({ onMessage, parse });
-  const optsRef = useRef({ autoReconnect, maxRetries, baseDelayMs, maxDelayMs, staleTimeoutMs });
+  const optsRef = useRef({ autoReconnect, maxRetries, baseDelayMs, maxDelayMs, staleTimeoutMs, connectTimeoutMs });
+  const connectTimerRef = useRef(null);
 
   // Mantener callbacks/opciones actualizados sin reabrir el socket.
   useEffect(() => {
     handlersRef.current = { onMessage, parse };
-    optsRef.current = { autoReconnect, maxRetries, baseDelayMs, maxDelayMs, staleTimeoutMs };
+    optsRef.current = { autoReconnect, maxRetries, baseDelayMs, maxDelayMs, staleTimeoutMs, connectTimeoutMs };
   });
 
   const setStatus = useCallback((s) => {
@@ -93,8 +95,16 @@ export function useWebSocket({
     }
   };
 
+  const clearConnectTimer = () => {
+    if (connectTimerRef.current) {
+      clearTimeout(connectTimerRef.current);
+      connectTimerRef.current = null;
+    }
+  };
+
   /** Cierra el socket actual desvinculando sus handlers (para que su onclose no dispare reconexiones). */
   const teardownSocket = (code = 1000, reason = 'cliente') => {
+    clearConnectTimer();
     const ws = wsRef.current;
     wsRef.current = null;
     if (!ws) return;
@@ -147,7 +157,27 @@ export function useWebSocket({
       }
       wsRef.current = ws;
 
+      // Tiempo límite de apertura: si la IP no existe en la red (p. ej. el punto de acceso del
+      // teléfono cambió de rango), el navegador puede quedarse "conectando" mucho tiempo sin error.
+      clearConnectTimer();
+      connectTimerRef.current = setTimeout(() => {
+        if (wsRef.current !== ws || ws.readyState !== WebSocket.CONNECTING) return;
+        let host = target;
+        try {
+          host = new URL(target).hostname;
+        } catch {
+          /* usar la URL completa */
+        }
+        setError(
+          `${host} no responde (${optsRef.current.connectTimeoutMs / 1000} s). Comprueba que el ESP32 esté encendido y en la misma red; ` +
+            'si reiniciaste el punto de acceso del teléfono, su IP pudo cambiar: revisa el Monitor Serie.',
+        );
+        teardownSocket(4001, 'timeout');
+        scheduleReconnect();
+      }, optsRef.current.connectTimeoutMs);
+
       ws.onopen = () => {
+        clearConnectTimer();
         retryRef.current = 0;
         setRetryCount(0);
         setError(null);
@@ -189,6 +219,7 @@ export function useWebSocket({
 
       ws.onclose = (ev) => {
         if (wsRef.current !== ws) return; // socket ya reemplazado
+        clearConnectTimer();
         wsRef.current = null;
         if (manualCloseRef.current) {
           setStatus(WS_STATUS.CLOSED);
